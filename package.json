@@ -1,0 +1,19 @@
+{
+  "name": "jev-auto-router-skill",
+  "version": "0.1.0",
+  "description": "Route coding tasks to the right model + effort level via TypeSafe JEV, without the host agent needing any provider keys of its own.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "jev-router": "./src/cli.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "src",
+    "integrations",
+    "README.md",
+    "LICENSE"
+  ]
+}

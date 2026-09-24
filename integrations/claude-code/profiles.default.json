@@ -1,0 +1,98 @@
+[
+  {
+    "id": "fable-low",
+    "model": "claude-fable-5-1",
+    "effort": "low",
+    "description": "Frontier model kept brief: rarely appropriate, mainly for quick top-tier judgment calls on ambiguous work without a long session."
+  },
+  {
+    "id": "fable-medium",
+    "model": "claude-fable-5-1",
+    "effort": "medium",
+    "description": "Frontier model at normal reasoning depth: strong default when a task needs top-tier judgment but isn't yet a multi-day effort."
+  },
+  {
+    "id": "fable-high",
+    "model": "claude-fable-5-1",
+    "effort": "high",
+    "description": "Ambitious, codebase-spanning features, deep code review, or performance work needing sustained, careful reasoning across many files."
+  },
+  {
+    "id": "fable-max",
+    "model": "claude-fable-5-1",
+    "effort": "max",
+    "description": "The hardest, longest-horizon work: multi-day autonomous sessions, root-cause fixes on ambiguous architecture problems, avoiding shortcuts."
+  },
+  {
+    "id": "opus-low",
+    "model": "claude-opus-5-5",
+    "effort": "low",
+    "description": "Strongest model kept brief: quick opinions or small edits where top-tier judgment matters more than exhaustive reasoning."
+  },
+  {
+    "id": "opus-medium",
+    "model": "claude-opus-5-5",
+    "effort": "medium",
+    "description": "Strong general-purpose coding with normal reasoning depth, for moderately complex features or bugs."
+  },
+  {
+    "id": "opus-high",
+    "model": "claude-opus-5-5",
+    "effort": "high",
+    "description": "Complex multi-file implementation, tricky debugging, or non-obvious design tradeoffs."
+  },
+  {
+    "id": "opus-max",
+    "model": "claude-opus-5-5",
+    "effort": "max",
+    "description": "Hardest tasks: system/architecture redesign, subtle concurrency or distributed bugs, deep unfamiliar-codebase investigation."
+  },
+  {
+    "id": "sonnet-low",
+    "model": "claude-sonnet-5",
+    "effort": "low",
+    "description": "Trivial edits: renames, formatting, single-file mechanical changes."
+  },
+  {
+    "id": "sonnet-medium",
+    "model": "claude-sonnet-5",
+    "effort": "medium",
+    "description": "Default for normal feature work and isolated bug fixes with typical reasoning needs."
+  },
+  {
+    "id": "sonnet-high",
+    "model": "claude-sonnet-5",
+    "effort": "high",
+    "description": "Multi-file refactors or debugging that needs careful reasoning but not the largest model."
+  },
+  {
+    "id": "sonnet-max",
+    "model": "claude-sonnet-5",
+    "effort": "max",
+    "description": "Demanding reasoning tasks where a fast/strong balance is preferred over the largest model."
+  },
+  {
+    "id": "haiku-low",
+    "model": "claude-haiku-4-5-20251001",
+    "effort": "low",
+    "description": "Fastest, cheapest option for trivial, mechanical, low-risk changes."
+  },
+  {
+    "id": "haiku-medium",
+    "model": "claude-haiku-4-5-20251001",
+    "effort": "medium",
+    "description": "Simple, well-specified tasks that need a bit more care than the lowest tier."
+  },
+  {
+    "id": "haiku-high",
+    "model": "claude-haiku-4-5-20251001",
+    "effort": "high",
+    "description": "Rarely appropriate; a smaller model reasoning hard, useful mainly for cost-constrained but non-trivial tasks."
+  },
+  {
+    "id": "haiku-max",
+    "model": "claude-haiku-4-5-20251001",
+    "effort": "max",
+    "description": "Edge case: exhaust the smallest model's reasoning before escalating to a larger one."
+  }
+]

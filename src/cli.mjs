@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import "./load-env.mjs";
 import { existsSync } from "node:fs";
-import { symlink, chmod, copyFile, mkdir } from "node:fs/promises";
+import { symlink, chmod, copyFile, mkdir, lstat, readlink, unlink } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -115,6 +115,55 @@ async function cmdDecide(opts) {
   console.log(JSON.stringify(decision, null, 2));
 }
 
+// Checks more than existsSync would: a Windows git checkout with
+// core.symlinks=false writes a committed symlink as a plain text file
+// containing the target path, not a real symlink — existsSync alone would
+// see "something's there" and silently leave it broken. This verifies the
+// path is an actual symlink pointing at the right target, and repairs it
+// if not. A real directory at this path is left untouched rather than
+// deleted, since that could be user content rather than a broken checkout.
+async function ensureSkillsSymlink(harness) {
+  const skillsLink = join(REPO_ROOT, ".claude", "skills");
+  const expectedTarget = join("..", "integrations", harness, "skills");
+
+  // existsSync follows symlinks to their target, so a *broken* symlink
+  // (entry present, target missing) reports false — indistinguishable from
+  // "nothing here" — and a plain symlink() call then fails with EEXIST
+  // against the entry existsSync claimed wasn't there. lstat + catching
+  // ENOENT reports the entry itself, not what it resolves to.
+  let stat;
+  try {
+    stat = await lstat(skillsLink);
+  } catch (err) {
+    if (err.code !== "ENOENT") throw err;
+    stat = null;
+  }
+
+  if (!stat) {
+    await mkdir(join(REPO_ROOT, ".claude"), { recursive: true });
+    await symlink(expectedTarget, skillsLink);
+    return `created .claude/skills -> integrations/${harness}/skills`;
+  }
+
+  if (stat.isSymbolicLink()) {
+    const actualTarget = await readlink(skillsLink);
+    if (actualTarget === expectedTarget) {
+      return ".claude/skills already present and correct, left as-is";
+    }
+    await unlink(skillsLink);
+    await symlink(expectedTarget, skillsLink);
+    return `.claude/skills pointed at the wrong target (${actualTarget}) — recreated`;
+  }
+
+  if (stat.isDirectory()) {
+    return ".claude/skills exists as a real directory, not a symlink — left alone to avoid deleting content; move it aside and re-run init to fix";
+  }
+
+  await unlink(skillsLink);
+  await symlink(expectedTarget, skillsLink);
+  return ".claude/skills existed as a broken file stub (likely a Windows checkout without symlink support) — recreated as a real symlink";
+}
+
 async function cmdInit(opts) {
   const harness = opts.harness || "claude-code";
   const adapter = requireAdapter(harness);
@@ -128,14 +177,7 @@ async function cmdInit(opts) {
     steps.push(".env already exists, left as-is");
   }
 
-  const skillsLink = join(REPO_ROOT, ".claude", "skills");
-  if (!existsSync(skillsLink)) {
-    await mkdir(join(REPO_ROOT, ".claude"), { recursive: true });
-    await symlink(join("..", "integrations", harness, "skills"), skillsLink);
-    steps.push(`created .claude/skills -> integrations/${harness}/skills`);
-  } else {
-    steps.push(".claude/skills already present, left as-is");
-  }
+  steps.push(await ensureSkillsSymlink(harness));
 
   const hookScript = join(REPO_ROOT, ".claude", "hooks", "jev-nudge.sh");
   if (existsSync(hookScript)) {

@@ -67,7 +67,7 @@ node src/cli.mjs init
 `init` is idempotent — safe to re-run — and sets up everything below in one shot:
 
 - creates `.env` from `.env.example` if missing
-- creates the `.claude/skills` symlink Claude Code actually reads skills from
+- creates (and repairs, if broken — e.g. a Windows checkout without symlink support) the `.claude/skills` symlink Claude Code actually reads skills from
 - makes the routing hook executable
 - installs the **bundled default profile set** (16 pre-written model × effort profiles, ships in the repo) so you don't have to hand-write descriptions yourself
 
@@ -185,4 +185,4 @@ Only the task text and the cached profile list (ids + one-sentence descriptions)
 
 ## License
 
-MIT
+MIT — copyright line in `LICENSE` is still a placeholder (`jev-auto-router contributors`), pending a decision on the real holder name before this is published.

@@ -13,11 +13,13 @@ import {
 } from "./profile-store.mjs";
 import { decide } from "./jev-client.mjs";
 import * as claudeCode from "./adapters/claude-code.mjs";
+import * as cursor from "./adapters/cursor.mjs";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const ADAPTERS = {
   "claude-code": claudeCode,
+  cursor,
 };
 
 function parseArgs(argv) {
@@ -41,7 +43,7 @@ function requireAdapter(harness) {
   const adapter = ADAPTERS[harness];
   if (!adapter) {
     const known = Object.keys(ADAPTERS).join(", ");
-    if (harness === "cursor" || harness === "codex") {
+    if (harness === "codex") {
       console.error(`"${harness}" adapter is not implemented yet (discovery/switch mechanisms unverified).`);
     } else {
       console.error(`Unknown harness "${harness}". Known: ${known}`);
@@ -54,9 +56,17 @@ function requireAdapter(harness) {
 async function cmdDiscover(opts) {
   const harness = opts.harness || "claude-code";
   const adapter = requireAdapter(harness);
-  const models = adapter.DEFAULT_MODELS;
-  const efforts = adapter.DEFAULT_EFFORTS;
-  const profiles = cartesianProduct(models, efforts);
+  // Claude Code keeps the shared model × effort product (DEFAULT_MODELS ×
+  // DEFAULT_EFFORTS). Cursor exports discoverProfiles() instead: its plan
+  // catalog is per-account, and effort is already a parameter of each
+  // enabled variant, not a dimension this tool should expand.
+  let profiles;
+  if (adapter.discoverProfiles) {
+    profiles = await adapter.discoverProfiles();
+  } else {
+    const models = adapter.getModels ? await adapter.getModels() : adapter.DEFAULT_MODELS;
+    profiles = cartesianProduct(models, adapter.DEFAULT_EFFORTS);
+  }
   const path = draftPath(harness);
   await saveJson(path, profiles);
   console.log(
@@ -87,18 +97,28 @@ async function cmdFinalize(opts) {
     );
     process.exit(1);
   }
-  await saveJson(profilesPath(harness), draft);
-  if (adapter.generateRouteSkills) {
+  const finalized = draft.map(({ _discovery, ...profile }) => profile);
+  await saveJson(profilesPath(harness), finalized);
+  const skillsGenerated = Boolean(adapter.generateRouteSkills);
+  if (skillsGenerated) {
     await adapter.generateRouteSkills(REPO_ROOT, draft);
   }
   console.log(
-    JSON.stringify({ wrote: profilesPath(harness), generatedSkills: draft.length }, null, 2)
+    JSON.stringify(
+      {
+        wrote: profilesPath(harness),
+        profiles: draft.length,
+        generatedSkills: skillsGenerated ? draft.length : 0,
+      },
+      null,
+      2
+    )
   );
 }
 
 async function cmdDecide(opts) {
   const harness = opts.harness || "claude-code";
-  requireAdapter(harness);
+  const adapter = requireAdapter(harness);
   const task = opts.task;
   if (!task) {
     console.error('Missing --task "<description>"');
@@ -111,7 +131,8 @@ async function cmdDecide(opts) {
     );
     process.exit(1);
   }
-  const decision = await decide(task, profiles);
+  let decision = await decide(task, profiles);
+  if (adapter.annotateDecision) decision = adapter.annotateDecision(decision, profiles);
   console.log(JSON.stringify(decision, null, 2));
 }
 
@@ -168,6 +189,7 @@ async function cmdInit(opts) {
   const harness = opts.harness || "claude-code";
   const adapter = requireAdapter(harness);
   const steps = [];
+  let next;
 
   const envPath = join(REPO_ROOT, ".env");
   if (!existsSync(envPath)) {
@@ -177,34 +199,103 @@ async function cmdInit(opts) {
     steps.push(".env already exists, left as-is");
   }
 
-  steps.push(await ensureSkillsSymlink(harness));
+  if (adapter.generateRouteSkills) {
+    // Skill-based harness (Claude Code): something in-editor to wire up —
+    // symlink, hook, and a bundled profile set safe to hardcode because the
+    // model list is small, fixed, and public.
+    steps.push(await ensureSkillsSymlink(harness));
 
-  const hookScript = join(REPO_ROOT, ".claude", "hooks", "jev-nudge.sh");
-  if (existsSync(hookScript)) {
-    await chmod(hookScript, 0o755);
-    steps.push("ensured .claude/hooks/jev-nudge.sh is executable");
-  }
-
-  const finalPath = profilesPath(harness);
-  if (!existsSync(finalPath)) {
-    const bundled = join(REPO_ROOT, "integrations", harness, "profiles.default.json");
-    if (existsSync(bundled)) {
-      await saveJson(finalPath, await loadJson(bundled));
-      const profiles = await loadJson(finalPath);
-      if (adapter.generateRouteSkills) {
-        await adapter.generateRouteSkills(REPO_ROOT, profiles);
-      }
-      steps.push(`installed bundled default profiles (${profiles.length}) and generated route skills`);
-    } else {
-      steps.push(
-        `no profiles for "${harness}" and no bundled default found — run "discover" then "finalize"`
-      );
+    const hookScript = join(REPO_ROOT, ".claude", "hooks", "jev-nudge.sh");
+    if (existsSync(hookScript)) {
+      await chmod(hookScript, 0o755);
+      steps.push("ensured .claude/hooks/jev-nudge.sh is executable");
     }
-  } else {
-    steps.push(`profiles.json for "${harness}" already exists, left as-is`);
+
+    const finalPath = profilesPath(harness);
+    if (!existsSync(finalPath)) {
+      const bundled = join(REPO_ROOT, "integrations", harness, "profiles.default.json");
+      if (existsSync(bundled)) {
+        await saveJson(finalPath, await loadJson(bundled));
+        const profiles = await loadJson(finalPath);
+        await adapter.generateRouteSkills(REPO_ROOT, profiles);
+        steps.push(`installed bundled default profiles (${profiles.length}) and generated route skills`);
+      } else {
+        steps.push(
+          `no profiles for "${harness}" and no bundled default found — run "discover" then "finalize"`
+        );
+      }
+    } else {
+      steps.push(`profiles.json for "${harness}" already exists, left as-is`);
+    }
+    next = "Set your API key in .env, then run: claude";
+  } else if (adapter.launch) {
+    // Cursor cannot pin the open chat's model. The shipped skill under
+    // integrations/cursor/skills tells the agent to delegate to a sub-agent
+    // on the plan profile JEV picked. The model list is per-account, so
+    // there is no bundled profile set.
+    if (adapter.install) steps.push(await adapter.install(REPO_ROOT));
+    const finalPath = profilesPath(harness);
+    if (!existsSync(finalPath)) {
+      try {
+        let profiles = await adapter.discoverProfiles();
+        if (adapter.autoDescribeProfiles) {
+          profiles = adapter.autoDescribeProfiles(profiles);
+        }
+        const missing = profiles.filter((p) => !p.description);
+        if (missing.length > 0) {
+          throw new Error(`${missing.length} profile(s) still lack a description after auto-describe`);
+        }
+        await saveJson(finalPath, profiles);
+        steps.push(
+          `discovered ${profiles.length} plan profile(s), auto-filled descriptions, and wrote ${finalPath}`
+        );
+      } catch (err) {
+        steps.push(`could not write profiles.json: ${err.message}`);
+        steps.push(
+          `fallback: node src/cli.mjs discover --harness ${harness}, fill descriptions in the draft, then node src/cli.mjs finalize --harness ${harness}`
+        );
+      }
+    } else {
+      steps.push(`profiles.json for "${harness}" already exists, left as-is`);
+    }
+    next =
+      "Set OPENROUTER_API_KEY in .env (or TYPESAFE_API_KEY with JEV_PROVIDER=direct), then open this repo in Cursor. Optional: node src/cli.mjs doctor";
   }
 
-  console.log(JSON.stringify({ steps, next: "Set your API key in .env, then run: claude" }, null, 2));
+  console.log(JSON.stringify({ steps, next }, null, 2));
+}
+
+// For launcher-based harnesses only (Cursor). Skill-based harnesses
+// (Claude Code) route from inside the agent's own already-running session
+// via the jev-router skill — there's no separate "run" for those; running
+// jev-router's decide+skill-invoke *is* how a Claude Code task gets routed.
+async function cmdRun(opts) {
+  const harness = opts.harness || "claude-code";
+  const adapter = requireAdapter(harness);
+  if (!adapter.launch) {
+    console.error(
+      `"${harness}" has no launcher mechanism — it routes from inside the agent's own session instead (see its adapter).`
+    );
+    process.exit(1);
+  }
+  const task = opts.task;
+  if (!task) {
+    console.error('Missing --task "<description>"');
+    process.exit(1);
+  }
+  const profiles = await loadJson(profilesPath(harness));
+  if (!profiles) {
+    console.error(
+      `No profiles.json for harness "${harness}". Run "discover" then "finalize" first.`
+    );
+    process.exit(1);
+  }
+  const decision = await decide(task, profiles);
+  console.error(
+    `[jev-router] routed to ${decision.model} (${decision.source}${decision.reason ? ", " + decision.reason : ""})`
+  );
+  const result = await adapter.launch(decision, task);
+  process.exit(result.exitCode ?? 0);
 }
 
 async function cmdDoctor() {
@@ -240,11 +331,13 @@ async function main() {
       return cmdFinalize(opts);
     case "decide":
       return cmdDecide(opts);
+    case "run":
+      return cmdRun(opts);
     case "doctor":
       return cmdDoctor(opts);
     default:
       console.error(
-        "Usage: jev-router <init|discover|finalize|decide|doctor> [--harness claude-code] [--task \"...\"]"
+        "Usage: jev-router <init|discover|finalize|decide|run|doctor> [--harness claude-code|cursor] [--task \"...\"]"
       );
       process.exit(1);
   }
